@@ -357,6 +357,30 @@
     .reaction-pill .pill-emoji { font-size: 0.95rem; }
     .reaction-pill .pill-count { font-size: 0.78rem; opacity: 0.9; }
 
+    #typing-indicator {
+      min-height: 0; max-height: 0; overflow: hidden;
+      padding: 0 20px; color: #9aa; font-size: 0.82rem; font-style: italic;
+      display: flex; align-items: center; gap: 6px;
+      transition: max-height 0.2s ease, padding 0.2s ease;
+    }
+    #typing-indicator.visible {
+      max-height: 22px; padding: 4px 20px;
+    }
+    #typing-indicator .dots {
+      display: inline-flex; gap: 3px;
+    }
+    #typing-indicator .dots span {
+      width: 4px; height: 4px; border-radius: 50%;
+      background: currentColor; opacity: 0.5;
+      animation: typing-dot 1.2s infinite ease-in-out;
+    }
+    #typing-indicator .dots span:nth-child(2) { animation-delay: 0.15s; }
+    #typing-indicator .dots span:nth-child(3) { animation-delay: 0.3s; }
+    @keyframes typing-dot {
+      0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+      40%           { transform: translateY(-3px); opacity: 1; }
+    }
+
     #input-area {
       display: flex; padding: 14px; gap: 10px;
       background: rgba(0,0,0,0.18);
@@ -749,8 +773,9 @@
     </div>
     <div id="no-room">← Выберите или создайте комнату</div>
     <div id="messages" style="display:none"></div>
+    <div id="typing-indicator"></div>
     <div id="input-area" style="display:none">
-      <input id="msg-input" type="text" placeholder="Напишите сообщение..." maxlength="500" />
+      <input id="msg-input" type="text" placeholder="Напишите сообщение..." maxlength="500" oninput="onInputTyping()" />
       <button id="send-btn" onclick="sendMsg()">Отправить</button>
     </div>
   </div>
@@ -1102,6 +1127,8 @@
         currentRoomOwner = msg.owner || null;
         currentRoomPrivate = !!msg.private;
         updateChatTitle();
+        resetTypingState();
+        stopTyping();
         document.getElementById('no-room').style.display = 'none';
         document.getElementById('messages').style.display = 'flex';
         document.getElementById('input-area').style.display = 'flex';
@@ -1135,6 +1162,10 @@
         handleMsgDeleted(msg.msg_id);
       } else if (msg.type === 'msg_edited') {
         handleMsgEdited(msg.msg_id, msg.text);
+      } else if (msg.type === 'typing') {
+        noteTyping(msg.name);
+      } else if (msg.type === 'typing_stop') {
+        clearTyping(msg.name);
       } else if (msg.type === 'join_error') {
         if (msg.reason === 'bad_password') {
           toast(`Неверный пароль для комнаты «${msg.room}»`);
@@ -1404,6 +1435,70 @@
     ws.send(JSON.stringify({ type: 'message', text }));
     input.value = '';
     input.focus();
+    stopTyping();
+  }
+
+  /* ══════════════ Индикатор набора ══════════════ */
+  const TYPING_TTL = 4000;       // как долго держим чужой индикатор без heartbeat'а
+  const TYPING_HEARTBEAT = 2500; // как часто шлём свой heartbeat пока печатаем
+  const typingUsers = new Map(); // name -> timeoutId
+  let typingSent = false;
+  let typingSentResetTimer = null;
+
+  function onInputTyping() {
+    const input = document.getElementById('msg-input');
+    if (!ws || ws.readyState !== WebSocket.OPEN || !currentRoom) return;
+    if (!input.value.trim()) { stopTyping(); return; }
+    if (!typingSent) {
+      ws.send(JSON.stringify({ type: 'typing' }));
+      typingSent = true;
+      typingSentResetTimer = setTimeout(() => { typingSent = false; }, TYPING_HEARTBEAT);
+    }
+  }
+
+  function stopTyping() {
+    if (typingSentResetTimer) { clearTimeout(typingSentResetTimer); typingSentResetTimer = null; }
+    if (typingSent && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'typing_stop' }));
+    }
+    typingSent = false;
+  }
+
+  function noteTyping(name) {
+    if (!name || name === myName) return;
+    const prev = typingUsers.get(name);
+    if (prev) clearTimeout(prev);
+    typingUsers.set(name, setTimeout(() => {
+      typingUsers.delete(name);
+      renderTyping();
+    }, TYPING_TTL));
+    renderTyping();
+  }
+
+  function clearTyping(name) {
+    const prev = typingUsers.get(name);
+    if (prev) clearTimeout(prev);
+    typingUsers.delete(name);
+    renderTyping();
+  }
+
+  function resetTypingState() {
+    for (const t of typingUsers.values()) clearTimeout(t);
+    typingUsers.clear();
+    renderTyping();
+  }
+
+  function renderTyping() {
+    const el = document.getElementById('typing-indicator');
+    if (!el) return;
+    const names = [...typingUsers.keys()];
+    if (!names.length) { el.classList.remove('visible'); el.innerHTML = ''; return; }
+    let label;
+    if (names.length === 1) label = `${names[0]} печатает`;
+    else if (names.length === 2) label = `${names[0]} и ${names[1]} печатают`;
+    else label = `${names[0]}, ${names[1]} и ещё ${names.length - 2} печатают`;
+    el.innerHTML = `<span>${escapeHtml(label)}</span><span class="dots"><span></span><span></span><span></span></span>`;
+    el.classList.add('visible');
   }
 
   async function editMessage(msgId) {

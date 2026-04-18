@@ -431,6 +431,15 @@ async def handler(websocket):
                         "online": True,
                     }))
 
+            elif msg["type"] in ("typing", "typing_stop"):
+                room = info["room"]
+                if not room:
+                    continue
+                await broadcast_room(room, {
+                    "type": msg["type"],
+                    "name": info["name"],
+                }, exclude=websocket)
+
             elif msg["type"] in ("promote", "demote"):
                 room = info["room"]
                 target_name = (msg.get("name") or "").strip()
