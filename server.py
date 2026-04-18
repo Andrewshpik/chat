@@ -11,6 +11,7 @@ from websockets.http11 import Response
 from websockets.datastructures import Headers
 
 INDEX_PATH = Path(__file__).parent / "index.html"
+STATE_PATH = Path(os.environ.get("CHAT_STATE_PATH", Path(__file__).parent / "state.json"))
 
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -68,6 +69,75 @@ def store_message(room, payload):
         _forget_msg(old["id"])
     history.append(payload)
     msg_data[payload["id"]] = payload
+    schedule_save()
+
+
+def save_state():
+    payload = {
+        "room_owners": room_owners,
+        "room_passwords": room_passwords,
+        "room_admins": {r: sorted(names) for r, names in room_admins.items() if names},
+        "room_history": {r: list(h) for r, h in room_history.items() if h},
+        "msg_author": msg_author,
+        "reactions": {
+            mid: {e: sorted(names) for e, names in r.items()}
+            for mid, r in reactions.items() if r
+        },
+    }
+    tmp = STATE_PATH.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, STATE_PATH)
+    except Exception as e:
+        print(f"[!] не смог сохранить состояние: {e}")
+
+
+def load_state():
+    if not STATE_PATH.exists():
+        return
+    try:
+        data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[!] не смог прочитать состояние ({e}), стартую с чистого листа")
+        return
+
+    room_owners.update(data.get("room_owners", {}))
+    room_passwords.update(data.get("room_passwords", {}))
+    for r, names in data.get("room_admins", {}).items():
+        room_admins[r] = set(names)
+    for r, hist in data.get("room_history", {}).items():
+        dq = room_history[r]
+        for m in hist:
+            dq.append(m)
+            msg_data[m["id"]] = m
+            msg_room[m["id"]] = r
+    msg_author.update(data.get("msg_author", {}))
+    for mid, r in data.get("reactions", {}).items():
+        reactions[mid] = {e: set(names) for e, names in r.items()}
+
+    print(f"[i] Загружено: {len(room_owners)} комнат, "
+          f"{sum(len(h) for h in room_history.values())} сообщений")
+
+
+_save_scheduled = False
+
+async def save_soon(delay=0.5):
+    global _save_scheduled
+    if _save_scheduled:
+        return
+    _save_scheduled = True
+    try:
+        await asyncio.sleep(delay)
+        await asyncio.to_thread(save_state)
+    finally:
+        _save_scheduled = False
+
+
+def schedule_save():
+    try:
+        asyncio.get_running_loop().create_task(save_soon())
+    except RuntimeError:
+        pass
 
 
 def now():
@@ -208,6 +278,7 @@ async def handler(websocket):
                     room_owners[new_room] = name
                     if password:
                         room_passwords[new_room] = password
+                    schedule_save()
 
                 rooms[new_room].add(websocket)
                 info["room"] = new_room
@@ -285,6 +356,7 @@ async def handler(websocket):
                 snapshot = {e: list(names) for e, names in r.items()}
                 if msg_id in msg_data:
                     msg_data[msg_id]["reactions"] = snapshot
+                schedule_save()
                 await send_to_room(room, {
                     "type": "reaction_update",
                     "msg_id": msg_id,
@@ -313,6 +385,7 @@ async def handler(websocket):
                 msg_room.pop(msg_id, None)
                 msg_author.pop(msg_id, None)
                 reactions.pop(msg_id, None)
+                schedule_save()
                 await send_to_room(room, {
                     "type": "msg_deleted",
                     "msg_id": msg_id,
@@ -331,6 +404,7 @@ async def handler(websocket):
                     continue
                 if msg_id in msg_data:
                     msg_data[msg_id]["text"] = new_text
+                schedule_save()
                 await send_to_room(room, {
                     "type": "msg_edited",
                     "msg_id": msg_id,
@@ -386,6 +460,7 @@ async def handler(websocket):
                     admins.discard(target_name)
                     text = f"{target_name} больше не админ"
 
+                schedule_save()
                 await send_to_room(room, {
                     "type": "system",
                     "text": text,
@@ -442,11 +517,15 @@ async def process_request(connection, request):
 
 
 async def main():
+    load_state()
     host = "0.0.0.0"
     port = int(os.environ.get("PORT", 8765))
     print(f"Сервер на http://{host}:{port} (WebSocket + статика index.html)")
-    async with websockets.serve(handler, host, port, process_request=process_request):
-        await asyncio.Future()
+    try:
+        async with websockets.serve(handler, host, port, process_request=process_request):
+            await asyncio.Future()
+    finally:
+        save_state()
 
 
 asyncio.run(main())
