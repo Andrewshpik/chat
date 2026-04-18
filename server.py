@@ -4,7 +4,7 @@ import os
 import sys
 import uuid
 import websockets
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import defaultdict
 from pathlib import Path
 from websockets.http11 import Response
@@ -48,7 +48,7 @@ def pick_color(name):
 
 
 def now():
-    return datetime.now().strftime("%H:%M")
+    return datetime.now(timezone.utc).isoformat()
 
 
 async def broadcast_room(room, message, exclude=None):

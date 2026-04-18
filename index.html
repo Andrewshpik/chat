@@ -963,6 +963,20 @@
     return `${proto}//${loc.host}`;
   }
 
+  function fmtTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function fmtDateTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d)) return iso;
+    return d.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+  }
+
   function connect() {
     const nameInput = document.getElementById('name-input');
     const name = nameInput.value.trim();
@@ -994,7 +1008,7 @@
         document.getElementById('input-area').style.display = 'flex';
         document.getElementById('messages').innerHTML = '';
         document.getElementById('msg-input').focus();
-        appendSystem(`Вы вошли в комнату «${msg.room}»`, msg.time);
+        appendSystem(`Вы вошли в комнату «${msg.room}»`, fmtTime(msg.time));
         document.querySelectorAll('.room-item').forEach(el =>
           el.classList.toggle('active', el.querySelector('.room-name')?.textContent === `# ${msg.room}`)
         );
@@ -1004,7 +1018,7 @@
         updateChatTitle();
         renderUsers(msg.users);
       } else if (msg.type === 'system') {
-        appendSystem(msg.text, msg.time);
+        appendSystem(msg.text, fmtTime(msg.time));
       } else if (msg.type === 'message') {
         appendMessage(msg);
       } else if (msg.type === 'reaction_update') {
@@ -1227,7 +1241,7 @@
 
     const time = document.createElement('div');
     time.className = 'msg-time';
-    time.textContent = msg.time;
+    time.textContent = fmtTime(msg.time);
 
     const reactionsEl = document.createElement('div');
     reactionsEl.className = 'reactions';
@@ -1348,7 +1362,7 @@
     document.getElementById('profile-stats').innerHTML = `
       <div class="profile-stat"><span class="label">Роль</span><span class="value">${roleLabel}</span></div>
       <div class="profile-stat"><span class="label">Сообщений</span><span class="value">${p.msg_count}</span></div>
-      <div class="profile-stat"><span class="label">В чате с</span><span class="value">${p.joined_at}</span></div>
+      <div class="profile-stat"><span class="label">В чате с</span><span class="value">${fmtDateTime(p.joined_at)}</span></div>
       <div class="profile-stat"><span class="label">Текущая комната</span><span class="value">${escapeHtml(p.room)}</span></div>
     `;
 
