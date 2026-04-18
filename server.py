@@ -38,6 +38,8 @@ MAX_HISTORY = 1000
 room_history = defaultdict(deque)
 # msg_id -> message payload dict (shared with room_history entries for O(1) edits)
 msg_data = {}
+# Максимум комнат, которые сервер держит одновременно
+MAX_ROOMS = 10
 
 COLORS = [
     '#e94560', '#4caf50', '#2196f3', '#ff9800',
@@ -68,11 +70,6 @@ def store_message(room, payload):
     msg_data[payload["id"]] = payload
 
 
-def drop_room_history(room):
-    for m in room_history.pop(room, ()):
-        _forget_msg(m["id"])
-
-
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -95,11 +92,11 @@ async def broadcast_rooms_list():
     room_list = [
         {
             "name": r,
-            "count": len(m),
-            "owner": room_owners.get(r, ""),
+            "count": len(rooms.get(r, ())),
+            "owner": room_owners[r],
             "private": r in room_passwords,
         }
-        for r, m in rooms.items() if m
+        for r in room_owners
     ]
     data = json.dumps({"type": "rooms_list", "rooms": room_list})
     if clients:
@@ -177,7 +174,7 @@ async def handler(websocket):
                 new_room = msg["room"].strip()
                 password = (msg.get("password") or "").strip()
                 old_room = info["room"]
-                room_exists = new_room in rooms and rooms[new_room]
+                room_exists = new_room in room_owners
 
                 if room_exists and new_room in room_passwords:
                     if password != room_passwords[new_room]:
@@ -188,6 +185,15 @@ async def handler(websocket):
                         }))
                         continue
 
+                if not room_exists and len(room_owners) >= MAX_ROOMS:
+                    await websocket.send(json.dumps({
+                        "type": "join_error",
+                        "room": new_room,
+                        "reason": "too_many_rooms",
+                        "limit": MAX_ROOMS,
+                    }))
+                    continue
+
                 if old_room:
                     rooms[old_room].discard(websocket)
                     await broadcast_room(old_room, {
@@ -197,14 +203,8 @@ async def handler(websocket):
                     })
                     if rooms[old_room]:
                         await broadcast_room_users(old_room)
-                    else:
-                        del rooms[old_room]
-                        room_owners.pop(old_room, None)
-                        room_admins.pop(old_room, None)
-                        room_passwords.pop(old_room, None)
-                        drop_room_history(old_room)
 
-                if new_room not in room_owners:
+                if not room_exists:
                     room_owners[new_room] = name
                     if password:
                         room_passwords[new_room] = password
@@ -402,12 +402,6 @@ async def handler(websocket):
             rooms[room].discard(websocket)
             if rooms[room]:
                 await broadcast_room_users(room)
-            else:
-                del rooms[room]
-                room_owners.pop(room, None)
-                room_admins.pop(room, None)
-                room_passwords.pop(room, None)
-                drop_room_history(room)
             await broadcast_room(room, {
                 "type": "system",
                 "text": f"{name} покинул комнату",

@@ -1128,6 +1128,8 @@
       } else if (msg.type === 'join_error') {
         if (msg.reason === 'bad_password') {
           toast(`Неверный пароль для комнаты «${msg.room}»`);
+        } else if (msg.reason === 'too_many_rooms') {
+          toast(`Достигнут лимит комнат (${msg.limit})`);
         } else {
           toast(`Не удалось войти в «${msg.room}»`);
         }
