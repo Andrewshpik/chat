@@ -399,6 +399,7 @@
       background: rgba(0,0,0,0.18);
       border-top: 1px solid rgba(255,255,255,0.06);
       flex-shrink: 0;
+      position: relative;
     }
     #input-area input {
       flex: 1; padding: 12px 18px; border-radius: 12px;
@@ -424,6 +425,48 @@
     }
     #input-area button:active { transform: translateY(0); }
     #input-area button:disabled { background: #555; cursor: default; box-shadow: none; }
+
+    #emoji-btn {
+      padding: 0; width: 44px; height: 44px; flex-shrink: 0;
+      background: rgba(255,255,255,0.06); color: #eee;
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+      font-size: 1.35rem; line-height: 1; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: none;
+      transition: background 0.15s, transform 0.1s;
+    }
+    #emoji-btn:hover { background: rgba(255,255,255,0.12); transform: none; }
+    #emoji-btn.active { background: var(--accent); color: #fff; }
+
+    #emoji-picker {
+      display: none;
+      position: absolute; bottom: 76px; left: 14px; z-index: 20;
+      width: 300px; max-width: calc(100% - 28px); max-height: 260px;
+      overflow-y: auto;
+      padding: 10px;
+      background: color-mix(in srgb, var(--surface) 96%, transparent);
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 14px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+      backdrop-filter: blur(20px) saturate(140%);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+    }
+    #emoji-picker.open { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+    #emoji-picker button {
+      padding: 0; width: 100%; aspect-ratio: 1 / 1;
+      background: transparent; border: none; border-radius: 8px;
+      font-size: 1.35rem; line-height: 1; cursor: pointer; color: inherit;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: none;
+      transition: background 0.1s, transform 0.08s;
+    }
+    #emoji-picker button:hover { background: rgba(255,255,255,0.08); transform: none; box-shadow: none; }
+    #emoji-picker button:active { transform: scale(0.9); }
+
+    @media (max-width: 768px) {
+      #emoji-btn { width: 40px; height: 40px; font-size: 1.2rem; }
+      #emoji-picker { left: 10px; bottom: 70px; }
+      #emoji-picker.open { grid-template-columns: repeat(7, 1fr); }
+    }
 
     /* ── Участники ── */
     #users-panel {
@@ -788,6 +831,8 @@
     <div id="messages" style="display:none"></div>
     <div id="typing-indicator"></div>
     <div id="input-area" style="display:none">
+      <button id="emoji-btn" type="button" onclick="toggleEmojiPicker(event)" title="Эмодзи" aria-label="Эмодзи">😊</button>
+      <div id="emoji-picker"></div>
       <input id="msg-input" type="text" placeholder="Напишите сообщение..." maxlength="500" oninput="onInputTyping()" />
       <button id="send-btn" onclick="sendMsg()">Отправить</button>
     </div>
@@ -1287,6 +1332,65 @@
     document.body.classList.remove('drawer-rooms', 'drawer-users');
   }
 
+  /* ══════════════ Эмодзи-пикер ══════════════ */
+  const EMOJIS = [
+    '😀','😁','😂','🤣','😊','😉','😍','🥰','😘','😎','🤩','🤔','😏','😭','😢','😡',
+    '🤯','🥳','🤗','🤫','🤐','🤤','😴','😌','😔','😳','😱','🤪','🤨','😜','😝','😅',
+    '🙃','🙂','😇','🤓','🥺','😬','😤','🤬','🤒','🤧','🤮','👻','🤖','👽','💀','🎃',
+    '👍','👎','👌','✌️','🤝','🙏','👏','🙌','💪','🤞','🤟','🫶','👀','🫡','🤷','🤦',
+    '❤️','🧡','💛','💚','💙','💜','🖤','💔','💯','🔥','✨','🎉','🎊','🎁','⭐','🌟',
+    '☀️','🌙','☁️','⚡','🌈','❄️','💧','🍀','🌸','🌺','🍕','🍔','🍟','🍩','🍰','☕'
+  ];
+
+  function ensureEmojiPicker() {
+    const picker = document.getElementById('emoji-picker');
+    if (picker.childElementCount) return picker;
+    const frag = document.createDocumentFragment();
+    for (const e of EMOJIS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = e;
+      b.onclick = (ev) => { ev.stopPropagation(); insertEmoji(e); };
+      frag.appendChild(b);
+    }
+    picker.appendChild(frag);
+    return picker;
+  }
+
+  function toggleEmojiPicker(ev) {
+    if (ev) ev.stopPropagation();
+    const picker = ensureEmojiPicker();
+    const btn = document.getElementById('emoji-btn');
+    const isOpen = picker.classList.toggle('open');
+    btn.classList.toggle('active', isOpen);
+  }
+
+  function closeEmojiPicker() {
+    document.getElementById('emoji-picker')?.classList.remove('open');
+    document.getElementById('emoji-btn')?.classList.remove('active');
+  }
+
+  function insertEmoji(emoji) {
+    const input = document.getElementById('msg-input');
+    if (!input) return;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    const v = input.value;
+    input.value = v.slice(0, start) + emoji + v.slice(end);
+    const pos = start + emoji.length;
+    input.focus();
+    input.setSelectionRange(pos, pos);
+    onInputTyping();
+  }
+
+  document.addEventListener('click', (e) => {
+    const picker = document.getElementById('emoji-picker');
+    const btn = document.getElementById('emoji-btn');
+    if (!picker || !picker.classList.contains('open')) return;
+    if (picker.contains(e.target) || btn.contains(e.target)) return;
+    closeEmojiPicker();
+  });
+
   function updateOnlineCount(n) {
     const el = document.getElementById('online-count');
     if (!el || typeof n !== 'number') return;
@@ -1481,6 +1585,7 @@
     input.value = '';
     input.focus();
     stopTyping();
+    closeEmojiPicker();
   }
 
   /* ══════════════ Индикатор набора ══════════════ */
