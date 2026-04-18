@@ -1,10 +1,15 @@
 import asyncio
+import http
 import json
+import os
 import sys
 import uuid
 import websockets
 from datetime import datetime
 from collections import defaultdict
+from pathlib import Path
+
+INDEX_PATH = Path(__file__).parent / "index.html"
 
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -363,9 +368,29 @@ async def handler(websocket):
         print(f"[-] {name} отключился. Всего: {len(clients)}")
 
 
+async def process_request(connection, request):
+    """Отдаём index.html по HTTP, пропускаем WebSocket-апгрейд дальше."""
+    path = request.path.split("?", 1)[0]
+    if path in ("/", "/index.html"):
+        try:
+            body = INDEX_PATH.read_bytes()
+        except FileNotFoundError:
+            return connection.respond(http.HTTPStatus.NOT_FOUND, b"index.html not found\n")
+        response = connection.respond(http.HTTPStatus.OK, body)
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+        return response
+    if path == "/health":
+        return connection.respond(http.HTTPStatus.OK, b"ok\n")
+    if path == "/favicon.ico":
+        return connection.respond(http.HTTPStatus.NO_CONTENT, b"")
+    return None
+
+
 async def main():
-    print("WebSocket чат запущен на ws://localhost:8765")
-    async with websockets.serve(handler, "localhost", 8765):
+    host = "0.0.0.0"
+    port = int(os.environ.get("PORT", 8765))
+    print(f"Сервер на http://{host}:{port} (WebSocket + статика index.html)")
+    async with websockets.serve(handler, host, port, process_request=process_request):
         await asyncio.Future()
 
 

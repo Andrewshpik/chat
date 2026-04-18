@@ -962,7 +962,7 @@
     if (!name) { nameInput.focus(); return; }
     myName = name;
 
-    ws = new WebSocket('ws://localhost:8765');
+    ws = new WebSocket(wsUrl());
 
     ws.onopen = () => {
       document.getElementById('login-screen').style.display = 'none';
