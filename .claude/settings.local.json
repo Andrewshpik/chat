@@ -12,7 +12,23 @@
       "Bash(netstat -ano)",
       "Bash(python:*)",
       "Bash(curl -s http://localhost:8765)",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('mcpServers', {}\\), indent=2\\)\\)\")",
+      "Bash(claude mcp:*)",
+      "Bash(npm list:*)",
+      "Bash(npm --version)",
+      "Read(//usr/local/bin/**)",
+      "Bash(cmd.exe /c \"node --version && npm --version\")",
+      "Bash(cmd.exe:*)",
+      "Bash(/c/Users/Andrewshpik/AppData/Local/Programs/Python/Python314/python.exe --version)",
+      "Bash(/c/Users/Andrewshpik/AppData/Local/Programs/Python/Python314/Scripts/pip.exe --version)",
+      "Bash(/c/Users/Andrewshpik/AppData/Local/Programs/Python/Python314/python.exe -m pip --version)",
+      "Bash(/c/Users/Andrewshpik/AppData/Local/Programs/Python/Python314/Scripts/uvx.exe --version)",
+      "Bash(/c/Users/Andrewshpik/AppData/Local/Programs/Python/Python314/Scripts/uv.exe --version)",
+      "Bash(/c/Users/Andrewshpik/AppData/Local/Programs/Python/Python314/python.exe -m pip install mcp-server-fetch)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
     ]
   }
 }
