@@ -183,7 +183,20 @@
     .room-item .room-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .room-item .room-count {
       font-size: 0.75rem; background: rgba(255,255,255,0.15);
-      padding: 1px 6px; border-radius: 10px; flex-shrink: 0; margin-left: 6px;
+      padding: 1px 6px; border-radius: 10px; flex-shrink: 0;
+    }
+    .room-item .room-meta {
+      display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: 6px;
+    }
+    .room-item .room-unread {
+      font-size: 0.72rem; font-weight: 700; color: #fff;
+      background: var(--accent); padding: 1px 7px; border-radius: 10px;
+      min-width: 20px; text-align: center;
+      box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 50%, transparent);
+    }
+    .room-item.has-unread:not(.active) .room-name { color: #fff; font-weight: 600; }
+    .room-item.active .room-unread {
+      background: #fff; color: var(--accent); box-shadow: none;
     }
     #new-room-area {
       padding: 10px; border-top: 1px solid var(--bg);
@@ -203,6 +216,23 @@
       transition: background 0.15s, color 0.15s;
     }
     #new-room-lock.active { background: var(--accent); color: white; }
+    #new-room-channel {
+      padding: 7px 9px; background: var(--surface); color: #aaa;
+      border: none; border-radius: 6px; cursor: pointer;
+      font-size: 0.95rem; line-height: 1; flex-shrink: 0;
+      transition: background 0.15s, color 0.15s;
+    }
+    #new-room-channel.active { background: var(--accent); color: white; }
+    .room-item .room-kind { font-size: 0.8rem; opacity: 0.8; margin-right: 4px; }
+
+    #channel-readonly-note {
+      display: none;
+      padding: 10px 16px; font-size: 0.85rem; color: #bbb;
+      background: rgba(0,0,0,0.18);
+      border-top: 1px solid rgba(255,255,255,0.06);
+      text-align: center; flex-shrink: 0;
+    }
+    #channel-readonly-note.visible { display: block; }
     #new-room-btn {
       padding: 7px 10px; background: var(--accent); color: white;
       border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; line-height: 1;
@@ -386,6 +416,7 @@
       background: rgba(0,0,0,0.18);
       border-top: 1px solid rgba(255,255,255,0.06);
       flex-shrink: 0;
+      position: relative;
     }
     #input-area input {
       flex: 1; padding: 12px 18px; border-radius: 12px;
@@ -411,6 +442,48 @@
     }
     #input-area button:active { transform: translateY(0); }
     #input-area button:disabled { background: #555; cursor: default; box-shadow: none; }
+
+    #emoji-btn {
+      padding: 0; width: 44px; height: 44px; flex-shrink: 0;
+      background: rgba(255,255,255,0.06); color: #eee;
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+      font-size: 1.35rem; line-height: 1; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: none;
+      transition: background 0.15s, transform 0.1s;
+    }
+    #emoji-btn:hover { background: rgba(255,255,255,0.12); transform: none; }
+    #emoji-btn.active { background: var(--accent); color: #fff; }
+
+    #emoji-picker {
+      display: none;
+      position: absolute; bottom: 76px; left: 14px; z-index: 20;
+      width: 300px; max-width: calc(100% - 28px); max-height: 260px;
+      overflow-y: auto;
+      padding: 10px;
+      background: color-mix(in srgb, var(--surface) 96%, transparent);
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 14px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+      backdrop-filter: blur(20px) saturate(140%);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+    }
+    #emoji-picker.open { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+    #emoji-picker button {
+      padding: 0; width: 100%; aspect-ratio: 1 / 1;
+      background: transparent; border: none; border-radius: 8px;
+      font-size: 1.35rem; line-height: 1; cursor: pointer; color: inherit;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: none;
+      transition: background 0.1s, transform 0.08s;
+    }
+    #emoji-picker button:hover { background: rgba(255,255,255,0.08); transform: none; box-shadow: none; }
+    #emoji-picker button:active { transform: scale(0.9); }
+
+    @media (max-width: 768px) {
+      #emoji-btn { width: 40px; height: 40px; font-size: 1.2rem; }
+      #emoji-picker { left: 10px; bottom: 70px; }
+      #emoji-picker.open { grid-template-columns: repeat(7, 1fr); }
+    }
 
     /* ── Участники ── */
     #users-panel {
@@ -755,6 +828,7 @@
     <div id="new-room-area">
       <div id="new-room-row">
         <input id="new-room-input" type="text" placeholder="Новая комната" maxlength="30" />
+        <button id="new-room-channel" onclick="toggleChannelMode()" title="Канал (писать могут только владелец и админы)">💬</button>
         <button id="new-room-lock" onclick="toggleLock()" title="Приватная комната">🔓</button>
         <button id="new-room-btn" onclick="createRoom()">+</button>
       </div>
@@ -774,7 +848,10 @@
     <div id="no-room">← Выберите или создайте комнату</div>
     <div id="messages" style="display:none"></div>
     <div id="typing-indicator"></div>
+    <div id="channel-readonly-note">📢 Это канал — писать могут только владелец и админы</div>
     <div id="input-area" style="display:none">
+      <button id="emoji-btn" type="button" onclick="toggleEmojiPicker(event)" title="Эмодзи" aria-label="Эмодзи">😊</button>
+      <div id="emoji-picker"></div>
       <input id="msg-input" type="text" placeholder="Напишите сообщение..." maxlength="500" oninput="onInputTyping()" />
       <button id="send-btn" onclick="sendMsg()">Отправить</button>
     </div>
@@ -1025,6 +1102,9 @@
   let currentRoomOwner = null;
   let currentRoomAdmins = new Set();
   let currentRoomPrivate = false;
+  let currentRoomIsChannel = false;
+  const unreadCounts = new Map();
+  let knownRoomsList = [];
   let viewingOwnProfile = false;
   let viewingProfileName = null;
 
@@ -1074,8 +1154,31 @@
     const title = document.getElementById('chat-header-title');
     if (!currentRoom) { title.textContent = 'Чат'; return; }
     const lockTag = currentRoomPrivate ? '🔒 ' : '';
+    const channelTag = currentRoomIsChannel ? '📢 ' : '';
+    const prefix = currentRoomIsChannel ? '' : '# ';
     const ownerTag = currentRoomOwner ? ` 👑 ${currentRoomOwner}` : '';
-    title.textContent = `${lockTag}# ${currentRoom}${ownerTag}`;
+    title.textContent = `${lockTag}${channelTag}${prefix}${currentRoom}${ownerTag}`;
+  }
+
+  function canWriteCurrentRoom() {
+    if (!currentRoom) return false;
+    if (!currentRoomIsChannel) return true;
+    return currentRoomOwner === myName || currentRoomAdmins.has(myName);
+  }
+
+  function updateChannelWriteMode() {
+    const inputArea = document.getElementById('input-area');
+    const note = document.getElementById('channel-readonly-note');
+    if (!currentRoom) return;
+    const writable = canWriteCurrentRoom();
+    if (writable) {
+      inputArea.style.display = 'flex';
+      note.classList.remove('visible');
+    } else {
+      inputArea.style.display = 'none';
+      note.classList.add('visible');
+      stopTyping();
+    }
   }
 
   function wsUrl() {
@@ -1120,13 +1223,23 @@
       if (msg.type === 'my_profile') {
         myColor = msg.color;
       } else if (msg.type === 'rooms_list') {
+        knownRoomsList = msg.rooms;
         renderRoomsList(msg.rooms);
         updateOnlineCount(msg.online);
+      } else if (msg.type === 'room_activity') {
+        if (msg.room && msg.room !== currentRoom) {
+          unreadCounts.set(msg.room, (unreadCounts.get(msg.room) || 0) + 1);
+          renderRoomsList(knownRoomsList);
+        }
       } else if (msg.type === 'room_joined') {
         currentRoom = msg.room;
         currentRoomOwner = msg.owner || null;
         currentRoomPrivate = !!msg.private;
+        currentRoomIsChannel = !!msg.channel;
+        unreadCounts.delete(msg.room);
+        renderRoomsList(knownRoomsList);
         updateChatTitle();
+        updateChannelWriteMode();
         resetTypingState();
         stopTyping();
         document.getElementById('no-room').style.display = 'none';
@@ -1142,7 +1255,10 @@
         if (msg.owner) currentRoomOwner = msg.owner;
         currentRoomAdmins = new Set(msg.admins || []);
         updateChatTitle();
+        updateChannelWriteMode();
         renderUsers(msg.users);
+      } else if (msg.type === 'channel_readonly') {
+        toast('Писать в канал могут только владелец и админы');
       } else if (msg.type === 'system') {
         appendSystem(msg.text, fmtTime(msg.time));
       } else if (msg.type === 'history') {
@@ -1191,24 +1307,49 @@
       currentRoomOwner = null;
       currentRoomAdmins = new Set();
       currentRoomPrivate = false;
+      currentRoomIsChannel = false;
+      unreadCounts.clear();
+      knownRoomsList = [];
+      updateTotalUnread();
     };
   }
 
   function renderRoomsList(rooms) {
+    rooms = rooms || [];
     const list = document.getElementById('rooms-list');
     list.innerHTML = '';
     if (rooms.length === 0) {
       list.innerHTML = '<div style="padding:12px 16px;color:#555;font-size:0.85rem">Нет активных комнат</div>';
+      updateTotalUnread();
       return;
     }
     rooms.forEach(r => {
       const div = document.createElement('div');
-      div.className = 'room-item' + (r.name === currentRoom ? ' active' : '');
+      const hasUnread = (unreadCounts.get(r.name) || 0) > 0;
+      div.className = 'room-item'
+        + (r.name === currentRoom ? ' active' : '')
+        + (hasUnread ? ' has-unread' : '');
       const lock = r.private ? '<span class="room-lock">🔒</span>' : '';
-      div.innerHTML = `<span class="room-name">${lock}# ${escapeHtml(r.name)}</span><span class="room-count">${r.count}</span>`;
-      div.onclick = () => joinRoom(r.name, { private: r.private });
+      const kind = r.channel ? '<span class="room-kind">📢</span>' : '';
+      const prefix = r.channel ? '' : '# ';
+      const unread = unreadCounts.get(r.name) || 0;
+      const unreadBadge = unread > 0
+        ? `<span class="room-unread">${unread > 99 ? '99+' : unread}</span>`
+        : '';
+      div.innerHTML =
+        `<span class="room-name">${lock}${kind}${prefix}${escapeHtml(r.name)}</span>` +
+        `<span class="room-meta">${unreadBadge}<span class="room-count">${r.count}</span></span>`;
+      div.onclick = () => joinRoom(r.name, { private: r.private, channel: r.channel });
       list.appendChild(div);
     });
+    updateTotalUnread();
+  }
+
+  function updateTotalUnread() {
+    let total = 0;
+    for (const n of unreadCounts.values()) total += n;
+    const base = 'WebSocket Чат';
+    document.title = total > 0 ? `(${total > 99 ? '99+' : total}) ${base}` : base;
   }
 
   async function joinRoom(name, opts = {}) {
@@ -1225,7 +1366,7 @@
       });
       if (password === null) return;
     }
-    ws.send(JSON.stringify({ type: 'join_room', room: name, password }));
+    ws.send(JSON.stringify({ type: 'join_room', room: name, password, channel: !!opts.channel }));
     closeDrawers();
   }
 
@@ -1241,6 +1382,65 @@
   function closeDrawers() {
     document.body.classList.remove('drawer-rooms', 'drawer-users');
   }
+
+  /* ══════════════ Эмодзи-пикер ══════════════ */
+  const EMOJIS = [
+    '😀','😁','😂','🤣','😊','😉','😍','🥰','😘','😎','🤩','🤔','😏','😭','😢','😡',
+    '🤯','🥳','🤗','🤫','🤐','🤤','😴','😌','😔','😳','😱','🤪','🤨','😜','😝','😅',
+    '🙃','🙂','😇','🤓','🥺','😬','😤','🤬','🤒','🤧','🤮','👻','🤖','👽','💀','🎃',
+    '👍','👎','👌','✌️','🤝','🙏','👏','🙌','💪','🤞','🤟','🫶','👀','🫡','🤷','🤦',
+    '❤️','🧡','💛','💚','💙','💜','🖤','💔','💯','🔥','✨','🎉','🎊','🎁','⭐','🌟',
+    '☀️','🌙','☁️','⚡','🌈','❄️','💧','🍀','🌸','🌺','🍕','🍔','🍟','🍩','🍰','☕'
+  ];
+
+  function ensureEmojiPicker() {
+    const picker = document.getElementById('emoji-picker');
+    if (picker.childElementCount) return picker;
+    const frag = document.createDocumentFragment();
+    for (const e of EMOJIS) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = e;
+      b.onclick = (ev) => { ev.stopPropagation(); insertEmoji(e); };
+      frag.appendChild(b);
+    }
+    picker.appendChild(frag);
+    return picker;
+  }
+
+  function toggleEmojiPicker(ev) {
+    if (ev) ev.stopPropagation();
+    const picker = ensureEmojiPicker();
+    const btn = document.getElementById('emoji-btn');
+    const isOpen = picker.classList.toggle('open');
+    btn.classList.toggle('active', isOpen);
+  }
+
+  function closeEmojiPicker() {
+    document.getElementById('emoji-picker')?.classList.remove('open');
+    document.getElementById('emoji-btn')?.classList.remove('active');
+  }
+
+  function insertEmoji(emoji) {
+    const input = document.getElementById('msg-input');
+    if (!input) return;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    const v = input.value;
+    input.value = v.slice(0, start) + emoji + v.slice(end);
+    const pos = start + emoji.length;
+    input.focus();
+    input.setSelectionRange(pos, pos);
+    onInputTyping();
+  }
+
+  document.addEventListener('click', (e) => {
+    const picker = document.getElementById('emoji-picker');
+    const btn = document.getElementById('emoji-btn');
+    if (!picker || !picker.classList.contains('open')) return;
+    if (picker.contains(e.target) || btn.contains(e.target)) return;
+    closeEmojiPicker();
+  });
 
   function updateOnlineCount(n) {
     const el = document.getElementById('online-count');
@@ -1258,10 +1458,22 @@
     else pass.value = '';
   }
 
+  function toggleChannelMode() {
+    const btn = document.getElementById('new-room-channel');
+    const active = btn.classList.toggle('active');
+    btn.textContent = active ? '📢' : '💬';
+    btn.title = active
+      ? 'Канал (писать могут только владелец и админы)'
+      : 'Обычная комната';
+  }
+
   function createRoom() {
     const input = document.getElementById('new-room-input');
     const pass = document.getElementById('new-room-pass');
-    const locked = document.getElementById('new-room-lock').classList.contains('active');
+    const lockBtn = document.getElementById('new-room-lock');
+    const channelBtn = document.getElementById('new-room-channel');
+    const locked = lockBtn.classList.contains('active');
+    const asChannel = channelBtn.classList.contains('active');
     const name = input.value.trim();
     if (!name) { input.focus(); return; }
     if (locked && !pass.value.trim()) { pass.focus(); return; }
@@ -1269,7 +1481,8 @@
     input.value = '';
     pass.value = '';
     if (locked) toggleLock();
-    joinRoom(name, { password });
+    if (asChannel) toggleChannelMode();
+    joinRoom(name, { password, channel: asChannel });
   }
 
   function roleBadge(name) {
@@ -1436,6 +1649,7 @@
     input.value = '';
     input.focus();
     stopTyping();
+    closeEmojiPicker();
   }
 
   /* ══════════════ Индикатор набора ══════════════ */
