@@ -216,6 +216,23 @@
       transition: background 0.15s, color 0.15s;
     }
     #new-room-lock.active { background: var(--accent); color: white; }
+    #new-room-channel {
+      padding: 7px 9px; background: var(--surface); color: #aaa;
+      border: none; border-radius: 6px; cursor: pointer;
+      font-size: 0.95rem; line-height: 1; flex-shrink: 0;
+      transition: background 0.15s, color 0.15s;
+    }
+    #new-room-channel.active { background: var(--accent); color: white; }
+    .room-item .room-kind { font-size: 0.8rem; opacity: 0.8; margin-right: 4px; }
+
+    #channel-readonly-note {
+      display: none;
+      padding: 10px 16px; font-size: 0.85rem; color: #bbb;
+      background: rgba(0,0,0,0.18);
+      border-top: 1px solid rgba(255,255,255,0.06);
+      text-align: center; flex-shrink: 0;
+    }
+    #channel-readonly-note.visible { display: block; }
     #new-room-btn {
       padding: 7px 10px; background: var(--accent); color: white;
       border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; line-height: 1;
@@ -811,6 +828,7 @@
     <div id="new-room-area">
       <div id="new-room-row">
         <input id="new-room-input" type="text" placeholder="Новая комната" maxlength="30" />
+        <button id="new-room-channel" onclick="toggleChannelMode()" title="Канал (писать могут только владелец и админы)">💬</button>
         <button id="new-room-lock" onclick="toggleLock()" title="Приватная комната">🔓</button>
         <button id="new-room-btn" onclick="createRoom()">+</button>
       </div>
@@ -830,6 +848,7 @@
     <div id="no-room">← Выберите или создайте комнату</div>
     <div id="messages" style="display:none"></div>
     <div id="typing-indicator"></div>
+    <div id="channel-readonly-note">📢 Это канал — писать могут только владелец и админы</div>
     <div id="input-area" style="display:none">
       <button id="emoji-btn" type="button" onclick="toggleEmojiPicker(event)" title="Эмодзи" aria-label="Эмодзи">😊</button>
       <div id="emoji-picker"></div>
@@ -1083,6 +1102,7 @@
   let currentRoomOwner = null;
   let currentRoomAdmins = new Set();
   let currentRoomPrivate = false;
+  let currentRoomIsChannel = false;
   const unreadCounts = new Map();
   let knownRoomsList = [];
   let viewingOwnProfile = false;
@@ -1134,8 +1154,31 @@
     const title = document.getElementById('chat-header-title');
     if (!currentRoom) { title.textContent = 'Чат'; return; }
     const lockTag = currentRoomPrivate ? '🔒 ' : '';
+    const channelTag = currentRoomIsChannel ? '📢 ' : '';
+    const prefix = currentRoomIsChannel ? '' : '# ';
     const ownerTag = currentRoomOwner ? ` 👑 ${currentRoomOwner}` : '';
-    title.textContent = `${lockTag}# ${currentRoom}${ownerTag}`;
+    title.textContent = `${lockTag}${channelTag}${prefix}${currentRoom}${ownerTag}`;
+  }
+
+  function canWriteCurrentRoom() {
+    if (!currentRoom) return false;
+    if (!currentRoomIsChannel) return true;
+    return currentRoomOwner === myName || currentRoomAdmins.has(myName);
+  }
+
+  function updateChannelWriteMode() {
+    const inputArea = document.getElementById('input-area');
+    const note = document.getElementById('channel-readonly-note');
+    if (!currentRoom) return;
+    const writable = canWriteCurrentRoom();
+    if (writable) {
+      inputArea.style.display = 'flex';
+      note.classList.remove('visible');
+    } else {
+      inputArea.style.display = 'none';
+      note.classList.add('visible');
+      stopTyping();
+    }
   }
 
   function wsUrl() {
@@ -1192,9 +1235,11 @@
         currentRoom = msg.room;
         currentRoomOwner = msg.owner || null;
         currentRoomPrivate = !!msg.private;
+        currentRoomIsChannel = !!msg.channel;
         unreadCounts.delete(msg.room);
         renderRoomsList(knownRoomsList);
         updateChatTitle();
+        updateChannelWriteMode();
         resetTypingState();
         stopTyping();
         document.getElementById('no-room').style.display = 'none';
@@ -1210,7 +1255,10 @@
         if (msg.owner) currentRoomOwner = msg.owner;
         currentRoomAdmins = new Set(msg.admins || []);
         updateChatTitle();
+        updateChannelWriteMode();
         renderUsers(msg.users);
+      } else if (msg.type === 'channel_readonly') {
+        toast('Писать в канал могут только владелец и админы');
       } else if (msg.type === 'system') {
         appendSystem(msg.text, fmtTime(msg.time));
       } else if (msg.type === 'history') {
@@ -1259,6 +1307,7 @@
       currentRoomOwner = null;
       currentRoomAdmins = new Set();
       currentRoomPrivate = false;
+      currentRoomIsChannel = false;
       unreadCounts.clear();
       knownRoomsList = [];
       updateTotalUnread();
@@ -1281,14 +1330,16 @@
         + (r.name === currentRoom ? ' active' : '')
         + (hasUnread ? ' has-unread' : '');
       const lock = r.private ? '<span class="room-lock">🔒</span>' : '';
+      const kind = r.channel ? '<span class="room-kind">📢</span>' : '';
+      const prefix = r.channel ? '' : '# ';
       const unread = unreadCounts.get(r.name) || 0;
       const unreadBadge = unread > 0
         ? `<span class="room-unread">${unread > 99 ? '99+' : unread}</span>`
         : '';
       div.innerHTML =
-        `<span class="room-name">${lock}# ${escapeHtml(r.name)}</span>` +
+        `<span class="room-name">${lock}${kind}${prefix}${escapeHtml(r.name)}</span>` +
         `<span class="room-meta">${unreadBadge}<span class="room-count">${r.count}</span></span>`;
-      div.onclick = () => joinRoom(r.name, { private: r.private });
+      div.onclick = () => joinRoom(r.name, { private: r.private, channel: r.channel });
       list.appendChild(div);
     });
     updateTotalUnread();
@@ -1315,7 +1366,7 @@
       });
       if (password === null) return;
     }
-    ws.send(JSON.stringify({ type: 'join_room', room: name, password }));
+    ws.send(JSON.stringify({ type: 'join_room', room: name, password, channel: !!opts.channel }));
     closeDrawers();
   }
 
@@ -1407,10 +1458,22 @@
     else pass.value = '';
   }
 
+  function toggleChannelMode() {
+    const btn = document.getElementById('new-room-channel');
+    const active = btn.classList.toggle('active');
+    btn.textContent = active ? '📢' : '💬';
+    btn.title = active
+      ? 'Канал (писать могут только владелец и админы)'
+      : 'Обычная комната';
+  }
+
   function createRoom() {
     const input = document.getElementById('new-room-input');
     const pass = document.getElementById('new-room-pass');
-    const locked = document.getElementById('new-room-lock').classList.contains('active');
+    const lockBtn = document.getElementById('new-room-lock');
+    const channelBtn = document.getElementById('new-room-channel');
+    const locked = lockBtn.classList.contains('active');
+    const asChannel = channelBtn.classList.contains('active');
     const name = input.value.trim();
     if (!name) { input.focus(); return; }
     if (locked && !pass.value.trim()) { pass.focus(); return; }
@@ -1418,7 +1481,8 @@
     input.value = '';
     pass.value = '';
     if (locked) toggleLock();
-    joinRoom(name, { password });
+    if (asChannel) toggleChannelMode();
+    joinRoom(name, { password, channel: asChannel });
   }
 
   function roleBadge(name) {

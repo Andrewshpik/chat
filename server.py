@@ -28,6 +28,8 @@ room_owners = {}
 room_admins = defaultdict(set)
 # room -> password (str); отсутствие ключа = публичная комната
 room_passwords = {}
+# имена комнат, помеченных как каналы (писать могут только владелец и админы)
+channels = set()
 # msg_id -> {emoji -> set(user_names)}
 reactions = {}
 # msg_id -> room
@@ -76,6 +78,7 @@ def save_state():
     payload = {
         "room_owners": room_owners,
         "room_passwords": room_passwords,
+        "channels": sorted(channels),
         "room_admins": {r: sorted(names) for r, names in room_admins.items() if names},
         "room_history": {r: list(h) for r, h in room_history.items() if h},
         "msg_author": msg_author,
@@ -103,6 +106,7 @@ def load_state():
 
     room_owners.update(data.get("room_owners", {}))
     room_passwords.update(data.get("room_passwords", {}))
+    channels.update(data.get("channels", []))
     for r, names in data.get("room_admins", {}).items():
         room_admins[r] = set(names)
     for r, hist in data.get("room_history", {}).items():
@@ -165,6 +169,7 @@ async def broadcast_rooms_list():
             "count": len(rooms.get(r, ())),
             "owner": room_owners[r],
             "private": r in room_passwords,
+            "channel": r in channels,
         }
         for r in room_owners
     ]
@@ -278,6 +283,8 @@ async def handler(websocket):
                     room_owners[new_room] = name
                     if password:
                         room_passwords[new_room] = password
+                    if msg.get("channel"):
+                        channels.add(new_room)
                     schedule_save()
 
                 rooms[new_room].add(websocket)
@@ -290,6 +297,7 @@ async def handler(websocket):
                     "room": new_room,
                     "owner": room_owners[new_room],
                     "private": new_room in room_passwords,
+                    "channel": new_room in channels,
                     "time": now()
                 }))
                 history = list(room_history.get(new_room, ()))
@@ -310,6 +318,15 @@ async def handler(websocket):
                 room = info["room"]
                 if not room:
                     continue
+                if room in channels:
+                    is_owner = room_owners.get(room) == info["name"]
+                    is_admin = info["name"] in room_admins.get(room, set())
+                    if not is_owner and not is_admin:
+                        await websocket.send(json.dumps({
+                            "type": "channel_readonly",
+                            "room": room,
+                        }))
+                        continue
                 t = now()
                 msg_id = uuid.uuid4().hex[:8]
                 reactions[msg_id] = {}
@@ -444,6 +461,11 @@ async def handler(websocket):
                 room = info["room"]
                 if not room:
                     continue
+                if room in channels:
+                    is_owner = room_owners.get(room) == info["name"]
+                    is_admin = info["name"] in room_admins.get(room, set())
+                    if not is_owner and not is_admin:
+                        continue
                 await broadcast_room(room, {
                     "type": msg["type"],
                     "name": info["name"],
