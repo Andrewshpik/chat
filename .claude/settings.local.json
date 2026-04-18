@@ -28,7 +28,12 @@
       "Bash(/c/Users/Andrewshpik/AppData/Local/Programs/Python/Python314/python.exe -m pip install mcp-server-fetch)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(git fetch *)",
+      "Bash(git pull *)",
+      "Bash(git stash *)"
     ]
   }
 }
