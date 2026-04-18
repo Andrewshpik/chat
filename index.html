@@ -1026,6 +1026,13 @@
         renderUsers(msg.users);
       } else if (msg.type === 'system') {
         appendSystem(msg.text, fmtTime(msg.time));
+      } else if (msg.type === 'history') {
+        for (const m of msg.messages || []) {
+          appendMessage(m);
+          if (m.reactions && Object.keys(m.reactions).length) {
+            updateReactions(m.id, m.reactions);
+          }
+        }
       } else if (msg.type === 'message') {
         appendMessage(msg);
       } else if (msg.type === 'reaction_update') {

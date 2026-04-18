@@ -5,7 +5,7 @@ import sys
 import uuid
 import websockets
 from datetime import datetime, timezone
-from collections import defaultdict
+from collections import defaultdict, deque
 from pathlib import Path
 from websockets.http11 import Response
 from websockets.datastructures import Headers
@@ -33,6 +33,11 @@ reactions = {}
 msg_room = {}
 # msg_id -> author name
 msg_author = {}
+# room -> deque of message payload dicts (hard cap = MAX_HISTORY)
+MAX_HISTORY = 1000
+room_history = defaultdict(deque)
+# msg_id -> message payload dict (shared with room_history entries for O(1) edits)
+msg_data = {}
 
 COLORS = [
     '#e94560', '#4caf50', '#2196f3', '#ff9800',
@@ -45,6 +50,27 @@ ALLOWED_EMOJI = {'👍', '❤️', '😂', '😮', '😢', '👎'}
 
 def pick_color(name):
     return COLORS[sum(ord(c) for c in name) % len(COLORS)]
+
+
+def _forget_msg(msg_id):
+    msg_data.pop(msg_id, None)
+    msg_room.pop(msg_id, None)
+    msg_author.pop(msg_id, None)
+    reactions.pop(msg_id, None)
+
+
+def store_message(room, payload):
+    history = room_history[room]
+    while len(history) >= MAX_HISTORY:
+        old = history.popleft()
+        _forget_msg(old["id"])
+    history.append(payload)
+    msg_data[payload["id"]] = payload
+
+
+def drop_room_history(room):
+    for m in room_history.pop(room, ()):
+        _forget_msg(m["id"])
 
 
 def now():
@@ -176,6 +202,7 @@ async def handler(websocket):
                         room_owners.pop(old_room, None)
                         room_admins.pop(old_room, None)
                         room_passwords.pop(old_room, None)
+                        drop_room_history(old_room)
 
                 if new_room not in room_owners:
                     room_owners[new_room] = name
@@ -194,6 +221,12 @@ async def handler(websocket):
                     "private": new_room in room_passwords,
                     "time": now()
                 }))
+                history = list(room_history.get(new_room, ()))
+                if history:
+                    await websocket.send(json.dumps({
+                        "type": "history",
+                        "messages": history,
+                    }))
                 await broadcast_room(new_room, {
                     "type": "system",
                     "text": f"{name} зашёл в комнату",
@@ -213,15 +246,18 @@ async def handler(websocket):
                 msg_author[msg_id] = info["name"]
                 info["msg_count"] += 1
                 print(f"[{t}] [{room}] {info['name']}: {msg['text']}")
-                await send_to_room(room, {
+                payload = {
                     "type": "message",
                     "id": msg_id,
                     "name": info["name"],
                     "color": info["color"],
                     "avatar": info["avatar"],
                     "text": msg["text"],
-                    "time": t
-                })
+                    "time": t,
+                    "reactions": {},
+                }
+                store_message(room, payload)
+                await send_to_room(room, payload)
 
             elif msg["type"] == "react":
                 msg_id = msg.get("msg_id")
@@ -246,10 +282,13 @@ async def handler(websocket):
                 if prev_emoji != emoji:
                     r.setdefault(emoji, set()).add(name)
 
+                snapshot = {e: list(names) for e, names in r.items()}
+                if msg_id in msg_data:
+                    msg_data[msg_id]["reactions"] = snapshot
                 await send_to_room(room, {
                     "type": "reaction_update",
                     "msg_id": msg_id,
-                    "reactions": {e: list(names) for e, names in r.items()}
+                    "reactions": snapshot,
                 })
 
             elif msg["type"] == "delete_msg":
@@ -265,6 +304,12 @@ async def handler(websocket):
                 is_admin = name in room_admins.get(room, set())
                 if name != author and not is_owner and not is_admin:
                     continue
+                payload = msg_data.pop(msg_id, None)
+                if payload is not None:
+                    try:
+                        room_history[room].remove(payload)
+                    except ValueError:
+                        pass
                 msg_room.pop(msg_id, None)
                 msg_author.pop(msg_id, None)
                 reactions.pop(msg_id, None)
@@ -284,6 +329,8 @@ async def handler(websocket):
                     continue
                 if msg_author.get(msg_id) != info["name"]:
                     continue
+                if msg_id in msg_data:
+                    msg_data[msg_id]["text"] = new_text
                 await send_to_room(room, {
                     "type": "msg_edited",
                     "msg_id": msg_id,
@@ -360,6 +407,7 @@ async def handler(websocket):
                 room_owners.pop(room, None)
                 room_admins.pop(room, None)
                 room_passwords.pop(room, None)
+                drop_room_history(room)
             await broadcast_room(room, {
                 "type": "system",
                 "text": f"{name} покинул комнату",
