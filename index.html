@@ -956,6 +956,13 @@
     title.textContent = `${lockTag}# ${currentRoom}${ownerTag}`;
   }
 
+  function wsUrl() {
+    const loc = window.location;
+    if (loc.protocol === 'file:') return 'ws://localhost:8765';
+    const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${loc.host}`;
+  }
+
   function connect() {
     const nameInput = document.getElementById('name-input');
     const name = nameInput.value.trim();
