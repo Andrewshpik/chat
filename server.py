@@ -526,16 +526,19 @@ async def handler(websocket):
         print(f"[-] {name} отключился. Всего: {len(clients)}")
 
 
-def http_response(status, reason, body, content_type="text/plain; charset=utf-8"):
-    return Response(
-        status, reason,
-        Headers([
-            ("Content-Type", content_type),
-            ("Content-Length", str(len(body))),
-            ("Connection", "close"),
-        ]),
-        body,
-    )
+def http_response(status, reason, body, content_type="text/plain; charset=utf-8", no_cache=False):
+    headers = [
+        ("Content-Type", content_type),
+        ("Content-Length", str(len(body))),
+        ("Connection", "close"),
+    ]
+    if no_cache:
+        headers += [
+            ("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0"),
+            ("Pragma", "no-cache"),
+            ("Expires", "0"),
+        ]
+    return Response(status, reason, Headers(headers), body)
 
 
 async def process_request(connection, request):
@@ -548,7 +551,7 @@ async def process_request(connection, request):
             body = INDEX_PATH.read_bytes()
         except FileNotFoundError:
             return http_response(404, "Not Found", b"index.html not found\n")
-        return http_response(200, "OK", body, "text/html; charset=utf-8")
+        return http_response(200, "OK", body, "text/html; charset=utf-8", no_cache=True)
     if path == "/health":
         return http_response(200, "OK", b"ok\n")
     if path == "/favicon.ico":
