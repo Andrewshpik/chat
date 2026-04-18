@@ -330,6 +330,15 @@ async def handler(websocket):
                 store_message(room, payload)
                 await send_to_room(room, payload)
 
+                in_room = rooms.get(room, set())
+                outsiders = [ws for ws in clients if ws not in in_room]
+                if outsiders:
+                    ping = json.dumps({"type": "room_activity", "room": room})
+                    await asyncio.gather(
+                        *[ws.send(ping) for ws in outsiders],
+                        return_exceptions=True,
+                    )
+
             elif msg["type"] == "react":
                 msg_id = msg.get("msg_id")
                 emoji = msg.get("emoji")
