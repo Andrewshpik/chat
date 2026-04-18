@@ -1,5 +1,4 @@
 import asyncio
-import http
 import json
 import os
 import sys
@@ -8,6 +7,8 @@ import websockets
 from datetime import datetime
 from collections import defaultdict
 from pathlib import Path
+from websockets.http11 import Response
+from websockets.datastructures import Headers
 
 INDEX_PATH = Path(__file__).parent / "index.html"
 
@@ -368,22 +369,34 @@ async def handler(websocket):
         print(f"[-] {name} отключился. Всего: {len(clients)}")
 
 
+def http_response(status, reason, body, content_type="text/plain; charset=utf-8"):
+    return Response(
+        status, reason,
+        Headers([
+            ("Content-Type", content_type),
+            ("Content-Length", str(len(body))),
+            ("Connection", "close"),
+        ]),
+        body,
+    )
+
+
 async def process_request(connection, request):
     """Отдаём index.html по HTTP, пропускаем WebSocket-апгрейд дальше."""
+    if request.headers.get("Upgrade", "").lower() == "websocket":
+        return None
     path = request.path.split("?", 1)[0]
     if path in ("/", "/index.html"):
         try:
             body = INDEX_PATH.read_bytes()
         except FileNotFoundError:
-            return connection.respond(http.HTTPStatus.NOT_FOUND, b"index.html not found\n")
-        response = connection.respond(http.HTTPStatus.OK, body)
-        response.headers["Content-Type"] = "text/html; charset=utf-8"
-        return response
+            return http_response(404, "Not Found", b"index.html not found\n")
+        return http_response(200, "OK", body, "text/html; charset=utf-8")
     if path == "/health":
-        return connection.respond(http.HTTPStatus.OK, b"ok\n")
+        return http_response(200, "OK", b"ok\n")
     if path == "/favicon.ico":
-        return connection.respond(http.HTTPStatus.NO_CONTENT, b"")
-    return None
+        return http_response(204, "No Content", b"")
+    return http_response(404, "Not Found", b"not found\n")
 
 
 async def main():
