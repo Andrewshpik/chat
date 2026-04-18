@@ -1,2 +1,4 @@
 .venv
 .idea
+state.json
+state.tmp

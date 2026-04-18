@@ -5,12 +5,13 @@ import sys
 import uuid
 import websockets
 from datetime import datetime, timezone
-from collections import defaultdict
+from collections import defaultdict, deque
 from pathlib import Path
 from websockets.http11 import Response
 from websockets.datastructures import Headers
 
 INDEX_PATH = Path(__file__).parent / "index.html"
+STATE_PATH = Path(os.environ.get("CHAT_STATE_PATH", Path(__file__).parent / "state.json"))
 
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -33,6 +34,13 @@ reactions = {}
 msg_room = {}
 # msg_id -> author name
 msg_author = {}
+# room -> deque of message payload dicts (hard cap = MAX_HISTORY)
+MAX_HISTORY = 1000
+room_history = defaultdict(deque)
+# msg_id -> message payload dict (shared with room_history entries for O(1) edits)
+msg_data = {}
+# Максимум комнат, которые сервер держит одновременно
+MAX_ROOMS = 10
 
 COLORS = [
     '#e94560', '#4caf50', '#2196f3', '#ff9800',
@@ -45,6 +53,91 @@ ALLOWED_EMOJI = {'👍', '❤️', '😂', '😮', '😢', '👎'}
 
 def pick_color(name):
     return COLORS[sum(ord(c) for c in name) % len(COLORS)]
+
+
+def _forget_msg(msg_id):
+    msg_data.pop(msg_id, None)
+    msg_room.pop(msg_id, None)
+    msg_author.pop(msg_id, None)
+    reactions.pop(msg_id, None)
+
+
+def store_message(room, payload):
+    history = room_history[room]
+    while len(history) >= MAX_HISTORY:
+        old = history.popleft()
+        _forget_msg(old["id"])
+    history.append(payload)
+    msg_data[payload["id"]] = payload
+    schedule_save()
+
+
+def save_state():
+    payload = {
+        "room_owners": room_owners,
+        "room_passwords": room_passwords,
+        "room_admins": {r: sorted(names) for r, names in room_admins.items() if names},
+        "room_history": {r: list(h) for r, h in room_history.items() if h},
+        "msg_author": msg_author,
+        "reactions": {
+            mid: {e: sorted(names) for e, names in r.items()}
+            for mid, r in reactions.items() if r
+        },
+    }
+    tmp = STATE_PATH.with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, STATE_PATH)
+    except Exception as e:
+        print(f"[!] не смог сохранить состояние: {e}")
+
+
+def load_state():
+    if not STATE_PATH.exists():
+        return
+    try:
+        data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[!] не смог прочитать состояние ({e}), стартую с чистого листа")
+        return
+
+    room_owners.update(data.get("room_owners", {}))
+    room_passwords.update(data.get("room_passwords", {}))
+    for r, names in data.get("room_admins", {}).items():
+        room_admins[r] = set(names)
+    for r, hist in data.get("room_history", {}).items():
+        dq = room_history[r]
+        for m in hist:
+            dq.append(m)
+            msg_data[m["id"]] = m
+            msg_room[m["id"]] = r
+    msg_author.update(data.get("msg_author", {}))
+    for mid, r in data.get("reactions", {}).items():
+        reactions[mid] = {e: set(names) for e, names in r.items()}
+
+    print(f"[i] Загружено: {len(room_owners)} комнат, "
+          f"{sum(len(h) for h in room_history.values())} сообщений")
+
+
+_save_scheduled = False
+
+async def save_soon(delay=0.5):
+    global _save_scheduled
+    if _save_scheduled:
+        return
+    _save_scheduled = True
+    try:
+        await asyncio.sleep(delay)
+        await asyncio.to_thread(save_state)
+    finally:
+        _save_scheduled = False
+
+
+def schedule_save():
+    try:
+        asyncio.get_running_loop().create_task(save_soon())
+    except RuntimeError:
+        pass
 
 
 def now():
@@ -69,13 +162,13 @@ async def broadcast_rooms_list():
     room_list = [
         {
             "name": r,
-            "count": len(m),
-            "owner": room_owners.get(r, ""),
+            "count": len(rooms.get(r, ())),
+            "owner": room_owners[r],
             "private": r in room_passwords,
         }
-        for r, m in rooms.items() if m
+        for r in room_owners
     ]
-    data = json.dumps({"type": "rooms_list", "rooms": room_list})
+    data = json.dumps({"type": "rooms_list", "rooms": room_list, "online": len(clients)})
     if clients:
         await asyncio.gather(*[ws.send(data) for ws in list(clients.keys())], return_exceptions=True)
 
@@ -151,7 +244,7 @@ async def handler(websocket):
                 new_room = msg["room"].strip()
                 password = (msg.get("password") or "").strip()
                 old_room = info["room"]
-                room_exists = new_room in rooms and rooms[new_room]
+                room_exists = new_room in room_owners
 
                 if room_exists and new_room in room_passwords:
                     if password != room_passwords[new_room]:
@@ -162,6 +255,15 @@ async def handler(websocket):
                         }))
                         continue
 
+                if not room_exists and len(room_owners) >= MAX_ROOMS:
+                    await websocket.send(json.dumps({
+                        "type": "join_error",
+                        "room": new_room,
+                        "reason": "too_many_rooms",
+                        "limit": MAX_ROOMS,
+                    }))
+                    continue
+
                 if old_room:
                     rooms[old_room].discard(websocket)
                     await broadcast_room(old_room, {
@@ -171,16 +273,12 @@ async def handler(websocket):
                     })
                     if rooms[old_room]:
                         await broadcast_room_users(old_room)
-                    else:
-                        del rooms[old_room]
-                        room_owners.pop(old_room, None)
-                        room_admins.pop(old_room, None)
-                        room_passwords.pop(old_room, None)
 
-                if new_room not in room_owners:
+                if not room_exists:
                     room_owners[new_room] = name
                     if password:
                         room_passwords[new_room] = password
+                    schedule_save()
 
                 rooms[new_room].add(websocket)
                 info["room"] = new_room
@@ -194,6 +292,12 @@ async def handler(websocket):
                     "private": new_room in room_passwords,
                     "time": now()
                 }))
+                history = list(room_history.get(new_room, ()))
+                if history:
+                    await websocket.send(json.dumps({
+                        "type": "history",
+                        "messages": history,
+                    }))
                 await broadcast_room(new_room, {
                     "type": "system",
                     "text": f"{name} зашёл в комнату",
@@ -213,15 +317,18 @@ async def handler(websocket):
                 msg_author[msg_id] = info["name"]
                 info["msg_count"] += 1
                 print(f"[{t}] [{room}] {info['name']}: {msg['text']}")
-                await send_to_room(room, {
+                payload = {
                     "type": "message",
                     "id": msg_id,
                     "name": info["name"],
                     "color": info["color"],
                     "avatar": info["avatar"],
                     "text": msg["text"],
-                    "time": t
-                })
+                    "time": t,
+                    "reactions": {},
+                }
+                store_message(room, payload)
+                await send_to_room(room, payload)
 
             elif msg["type"] == "react":
                 msg_id = msg.get("msg_id")
@@ -246,10 +353,14 @@ async def handler(websocket):
                 if prev_emoji != emoji:
                     r.setdefault(emoji, set()).add(name)
 
+                snapshot = {e: list(names) for e, names in r.items()}
+                if msg_id in msg_data:
+                    msg_data[msg_id]["reactions"] = snapshot
+                schedule_save()
                 await send_to_room(room, {
                     "type": "reaction_update",
                     "msg_id": msg_id,
-                    "reactions": {e: list(names) for e, names in r.items()}
+                    "reactions": snapshot,
                 })
 
             elif msg["type"] == "delete_msg":
@@ -265,9 +376,16 @@ async def handler(websocket):
                 is_admin = name in room_admins.get(room, set())
                 if name != author and not is_owner and not is_admin:
                     continue
+                payload = msg_data.pop(msg_id, None)
+                if payload is not None:
+                    try:
+                        room_history[room].remove(payload)
+                    except ValueError:
+                        pass
                 msg_room.pop(msg_id, None)
                 msg_author.pop(msg_id, None)
                 reactions.pop(msg_id, None)
+                schedule_save()
                 await send_to_room(room, {
                     "type": "msg_deleted",
                     "msg_id": msg_id,
@@ -284,6 +402,9 @@ async def handler(websocket):
                     continue
                 if msg_author.get(msg_id) != info["name"]:
                     continue
+                if msg_id in msg_data:
+                    msg_data[msg_id]["text"] = new_text
+                schedule_save()
                 await send_to_room(room, {
                     "type": "msg_edited",
                     "msg_id": msg_id,
@@ -309,6 +430,15 @@ async def handler(websocket):
                         "is_admin": bool(t_room) and target["name"] in room_admins.get(t_room, set()),
                         "online": True,
                     }))
+
+            elif msg["type"] in ("typing", "typing_stop"):
+                room = info["room"]
+                if not room:
+                    continue
+                await broadcast_room(room, {
+                    "type": msg["type"],
+                    "name": info["name"],
+                }, exclude=websocket)
 
             elif msg["type"] in ("promote", "demote"):
                 room = info["room"]
@@ -339,6 +469,7 @@ async def handler(websocket):
                     admins.discard(target_name)
                     text = f"{target_name} больше не админ"
 
+                schedule_save()
                 await send_to_room(room, {
                     "type": "system",
                     "text": text,
@@ -355,11 +486,6 @@ async def handler(websocket):
             rooms[room].discard(websocket)
             if rooms[room]:
                 await broadcast_room_users(room)
-            else:
-                del rooms[room]
-                room_owners.pop(room, None)
-                room_admins.pop(room, None)
-                room_passwords.pop(room, None)
             await broadcast_room(room, {
                 "type": "system",
                 "text": f"{name} покинул комнату",
@@ -400,11 +526,15 @@ async def process_request(connection, request):
 
 
 async def main():
+    load_state()
     host = "0.0.0.0"
     port = int(os.environ.get("PORT", 8765))
     print(f"Сервер на http://{host}:{port} (WebSocket + статика index.html)")
-    async with websockets.serve(handler, host, port, process_request=process_request):
-        await asyncio.Future()
+    try:
+        async with websockets.serve(handler, host, port, process_request=process_request):
+            await asyncio.Future()
+    finally:
+        save_state()
 
 
 asyncio.run(main())
