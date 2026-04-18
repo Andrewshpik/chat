@@ -806,6 +806,12 @@
     inp.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); closeDialog(inp.value); }
     });
+
+    const savedName = localStorage.getItem('chat:name');
+    if (savedName) {
+      const nameInput = document.getElementById('name-input');
+      if (nameInput) nameInput.value = savedName;
+    }
   });
 
   /* ══════════════ ТЕМЫ ══════════════ */
@@ -982,6 +988,7 @@
     const name = nameInput.value.trim();
     if (!name) { nameInput.focus(); return; }
     myName = name;
+    try { localStorage.setItem('chat:name', name); } catch (_) {}
 
     ws = new WebSocket(wsUrl());
 
