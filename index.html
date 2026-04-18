@@ -236,6 +236,13 @@
       box-shadow: 0 0 10px #4caf50;
       animation: pulse 2s ease-in-out infinite;
     }
+    #online-count {
+      flex-shrink: 0;
+      font-size: 0.78rem; font-weight: 600; color: #ccc;
+      background: rgba(255,255,255,0.06);
+      padding: 3px 8px; border-radius: 999px;
+      letter-spacing: 0.01em;
+    }
     @keyframes pulse {
       0%,100% { box-shadow: 0 0 10px #4caf50; }
       50%     { box-shadow: 0 0 18px #4caf50, 0 0 4px #4caf50; }
@@ -736,6 +743,7 @@
       <button class="drawer-toggle" id="rooms-toggle" onclick="toggleDrawer('rooms')" title="Комнаты" aria-label="Комнаты">☰</button>
       <div id="status-dot"></div>
       <span id="chat-header-title">Чат</span>
+      <span id="online-count" title="Сейчас онлайн">0 онлайн</span>
       <button id="settings-btn" onclick="openTheme()" title="Настройки темы">⚙️</button>
       <button class="drawer-toggle" id="users-toggle" onclick="toggleDrawer('users')" title="Участники" aria-label="Участники">👥</button>
     </div>
@@ -1088,6 +1096,7 @@
         myColor = msg.color;
       } else if (msg.type === 'rooms_list') {
         renderRoomsList(msg.rooms);
+        updateOnlineCount(msg.online);
       } else if (msg.type === 'room_joined') {
         currentRoom = msg.room;
         currentRoomOwner = msg.owner || null;
@@ -1200,6 +1209,12 @@
 
   function closeDrawers() {
     document.body.classList.remove('drawer-rooms', 'drawer-users');
+  }
+
+  function updateOnlineCount(n) {
+    const el = document.getElementById('online-count');
+    if (!el || typeof n !== 'number') return;
+    el.textContent = `${n} онлайн`;
   }
 
   function toggleLock() {

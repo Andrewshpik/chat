@@ -98,7 +98,7 @@ async def broadcast_rooms_list():
         }
         for r in room_owners
     ]
-    data = json.dumps({"type": "rooms_list", "rooms": room_list})
+    data = json.dumps({"type": "rooms_list", "rooms": room_list, "online": len(clients)})
     if clients:
         await asyncio.gather(*[ws.send(data) for ws in list(clients.keys())], return_exceptions=True)
 
