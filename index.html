@@ -2,6 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>WebSocket Чат</title>
   <style>
     :root {
@@ -618,6 +619,83 @@
     #dialog-confirm:hover { background: var(--accent-hover); }
     #dialog-confirm.danger { background: #d32f2f; }
     #dialog-confirm.danger:hover { background: #b71c1c; }
+
+    /* ── Кнопки drawer'ов (видны только на мобильном) ── */
+    .drawer-toggle {
+      display: none;
+      flex-shrink: 0;
+      background: rgba(255,255,255,0.08); border: none; cursor: pointer;
+      font-size: 1.1rem; color: #ccc; padding: 6px 10px;
+      border-radius: 8px; line-height: 1;
+      transition: background 0.15s, color 0.15s;
+    }
+    .drawer-toggle:hover { background: var(--hover); color: #eee; }
+
+    #drawer-backdrop {
+      display: none; position: absolute; inset: 0;
+      background: rgba(0,0,0,0.45); z-index: 8;
+    }
+
+    /* ── Мобильный макет ── */
+    @media (max-width: 768px) {
+      body { height: 100dvh; }
+
+      #login-screen {
+        width: 92vw; max-width: 420px; padding: 28px 22px;
+      }
+      #login-screen h1 { font-size: 1.4rem; }
+
+      #chat-screen {
+        width: 100%; max-width: none; height: 100dvh;
+        border-radius: 0; border: none;
+        position: relative;
+      }
+
+      .drawer-toggle { display: inline-flex; align-items: center; justify-content: center; }
+
+      #chat-header { padding: 12px 14px; gap: 8px; font-size: 1rem; }
+      #chat-header-title { font-size: 0.95rem; }
+
+      #sidebar, #users-panel {
+        position: absolute; top: 0; bottom: 0;
+        width: 78%; max-width: 300px; z-index: 10;
+        transition: transform 0.25s ease;
+        box-shadow: 0 0 30px rgba(0,0,0,0.5);
+        background: color-mix(in srgb, var(--surface) 96%, transparent);
+      }
+      #sidebar { left: 0; transform: translateX(-100%); border-right: 1px solid rgba(255,255,255,0.08); }
+      #users-panel { right: 0; transform: translateX(100%); border-left: 1px solid rgba(255,255,255,0.08); }
+
+      body.drawer-rooms #sidebar { transform: translateX(0); }
+      body.drawer-users #users-panel { transform: translateX(0); }
+      body.drawer-rooms #drawer-backdrop,
+      body.drawer-users #drawer-backdrop { display: block; }
+
+      #messages { padding: 12px 12px; gap: 10px; }
+      .msg-bubble { max-width: 78vw; font-size: 0.95rem; }
+      .avatar { width: 34px; height: 34px; font-size: 0.85rem; }
+
+      #input-area { padding: 10px; gap: 8px; }
+      #input-area input { font-size: 16px; padding: 10px 12px; }
+      #input-area button { padding: 10px 14px; font-size: 0.9rem; }
+
+      #profile-card { width: 92vw; max-width: 360px; }
+
+      #dialog-box { width: 92vw; max-width: 360px; padding: 20px; }
+      #dialog-input { font-size: 16px; }
+
+      /* iOS: не зумить при фокусе инпутов */
+      #name-input, #new-room-input, #new-room-pass, #msg-input, #dialog-input {
+        font-size: 16px;
+      }
+    }
+
+    @media (max-width: 400px) {
+      #chat-header { padding: 10px 10px; }
+      #chat-header-title { font-size: 0.9rem; }
+      #settings-btn { padding: 4px 6px; font-size: 1rem; }
+      .msg-bubble { max-width: 82vw; }
+    }
   </style>
 </head>
 <body>
@@ -654,9 +732,11 @@
 
   <div id="chat-area">
     <div id="chat-header">
+      <button class="drawer-toggle" id="rooms-toggle" onclick="toggleDrawer('rooms')" title="Комнаты" aria-label="Комнаты">☰</button>
       <div id="status-dot"></div>
       <span id="chat-header-title">Чат</span>
       <button id="settings-btn" onclick="openTheme()" title="Настройки темы">⚙️</button>
+      <button class="drawer-toggle" id="users-toggle" onclick="toggleDrawer('users')" title="Участники" aria-label="Участники">👥</button>
     </div>
     <div id="no-room">← Выберите или создайте комнату</div>
     <div id="messages" style="display:none"></div>
@@ -670,6 +750,8 @@
     <div id="users-header">Участники</div>
     <div id="users-list"></div>
   </div>
+
+  <div id="drawer-backdrop" onclick="closeDrawers()"></div>
 </div>
 
 <!-- Профиль -->
@@ -1101,6 +1183,20 @@
       if (password === null) return;
     }
     ws.send(JSON.stringify({ type: 'join_room', room: name, password }));
+    closeDrawers();
+  }
+
+  function toggleDrawer(which) {
+    const body = document.body;
+    const rooms = body.classList.contains('drawer-rooms');
+    const users = body.classList.contains('drawer-users');
+    body.classList.remove('drawer-rooms', 'drawer-users');
+    if (which === 'rooms' && !rooms) body.classList.add('drawer-rooms');
+    if (which === 'users' && !users) body.classList.add('drawer-users');
+  }
+
+  function closeDrawers() {
+    document.body.classList.remove('drawer-rooms', 'drawer-users');
   }
 
   function toggleLock() {
